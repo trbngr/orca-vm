@@ -185,3 +185,7 @@ Read the trust note at the top of `modules/github-runner.nix` before pointing a 
   Orca names.
 - **Auto-deallocate** is not wired: an Azure Automation schedule or a cron on the laptop calling
   `azure/vm.sh stop` overnight is the shape.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Orca itself is packaged from its release AppImage and carries its own license.

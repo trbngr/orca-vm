@@ -1,0 +1,16 @@
+# orca.yaml — what Orca reads for a repository. Copy this file to the repository root and the four
+# scripts next to it to scripts/orca-vm/ (paths below), commit, and "Podman sandbox" appears in the
+# "Run on" picker when creating a workspace on the orca-vm host.
+#
+# environmentRecipes is read from the PRIMARY checkout's orca.yaml, so a recipe appears only once this
+# file is on the default branch and pulled there. `orca vm recipe doctor <id> --repo-path <checkout>
+# --json` validates a working copy on any branch (add --provision to run create → validate → destroy).
+#
+# Design and host side: orca-vm (modules/sandbox.nix, packages/sandbox-rootfs.nix).
+environmentRecipes:
+  - id: podman-sandbox
+    name: Podman sandbox (orca-vm)
+    create: ./scripts/orca-vm/podman-create.sh
+    suspend: ./scripts/orca-vm/podman-suspend.sh
+    resume: ./scripts/orca-vm/podman-resume.sh
+    destroy: ./scripts/orca-vm/podman-destroy.sh

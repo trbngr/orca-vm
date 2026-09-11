@@ -1,0 +1,9 @@
+# nix
+result
+result-*
+.direnv/
+
+# never commit secrets or install-time staging
+*.authkey
+extra-files/
+azure/.state/

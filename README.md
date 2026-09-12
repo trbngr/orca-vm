@@ -35,20 +35,20 @@ is the easy way), `az login` into the subscription, a Tailscale account and an S
 box to join unattended.
 
 ```bash
-direnv allow                      # az, nixos-anywhere, jq from the flake (or: nix develop)
+direnv allow                      # the `orca-vm` command, with az, nixos-anywhere, nixos-rebuild and jq (or: nix develop)
 nix flake check
 
-azure/create-vm.sh --plan         # what will be created, and from which IP SSH is allowed
-azure/create-vm.sh                # ~3 min. Prints the public IP.
+orca-vm create --plan         # what will be created, and from which IP SSH is allowed
+orca-vm create                # ~3 min. Prints the public IP.
 
-TS_AUTHKEY=tskey-auth-… azure/install-nixos.sh   # ~10–15 min: kexec → disko (OS disk only) → build on the VM → install → reboot
+TS_AUTHKEY=tskey-auth-… orca-vm install   # ~10–15 min: kexec → disko (OS disk only) → build on the VM → install → reboot
 ```
 
 After the reboot:
 
 ```bash
 ssh root@<public ip> tailscale status          # joined? (or: sudo tailscale up --ssh, once, if no key was given)
-azure/vm.sh detach-public-ip                   # the box is now tailnet-only
+orca-vm detach-public-ip                   # the box is now tailnet-only
 ssh <user>@<hostName>                          # Tailscale SSH from here on
 ```
 
@@ -68,14 +68,14 @@ and paired clients keep their grant until it is revoked under Shared Server Acce
 
 | Task | Command |
 |------|---------|
-| Change the host | edit, `nix flake check`, `azure/vm.sh rebuild` (builds on the VM, over the tailnet) |
+| Change the host | edit, `nix flake check`, `orca-vm rebuild` (builds on the VM, over the tailnet) |
 | Update Orca | bump `version` in `packages/orca.nix`, `nix store prefetch-file <url>` for both AppImages, paste the hashes, rebuild |
 | Update nixpkgs | `nix flake update`, review `flake.lock`, rebuild |
 | Add a repo | a line in `workspace/repos.conf` **and** in `~/<workspace>/repos.conf` on the box (seeding never overwrites), then `~/<workspace>/init.sh` |
-| Stop billing compute | `azure/vm.sh stop` — deallocated VMs bill disks only; `/home` is on the data disk and survives; `/mnt/resource` does not |
-| More cores | `azure/vm.sh resize Standard_D32ads_v5` |
-| Rescue | `azure/vm.sh serial` — the Azure serial console; the kernel logs to ttyS0 |
-| No tailnet on this machine | `azure/vm.sh run '<shell>'` — runs as root through the Azure agent, no network path needed (slow, output capped) |
+| Stop billing compute | `orca-vm stop` — deallocated VMs bill disks only; `/home` is on the data disk and survives; `/mnt/resource` does not |
+| More cores | `orca-vm resize Standard_D32ads_v5` |
+| Rescue | `orca-vm serial` — the Azure serial console; the kernel logs to ttyS0 |
+| No tailnet on this machine | `orca-vm run '<shell>'` — runs as root through the Azure agent, no network path needed (slow, output capped) |
 
 Costs, order of magnitude (verify in the pricing calculator): `D16ads_v5` ≈ $0.8/h running; a 1 TiB
 Premium SSD data disk ≈ $135/mo; the OS disk ≈ $20/mo; the NAT gateway ≈ $32/mo plus egress. Stopped
@@ -87,7 +87,7 @@ overnight and weekends, compute is roughly a third of always-on.
 |------|------|
 | `host.nix` | The machine's identity and your choices — the one file to edit |
 | `flake.nix` | `nixosConfigurations.<hostName>`, `packages.<linux>.orca`, a devShell (az, nixos-anywhere, jq), `checks` that evaluate the host |
-| `nixos/default.nix`, `disko.nix` | Module composition (add your own NixOS options here); the OS-disk layout (the data disk is deliberately not disko's) |
+| `modules/host.nix`, `modules/disko.nix` | host.nix → options, the one place it is read; the OS-disk layout (the data disk is deliberately not disko's) |
 | `modules/azure.nix` | Platform contract via nixpkgs' `azure-common` (waagent, cloud-init, Hyper-V, serial console, `/dev/disk/azure/*`), UEFI, firewall |
 | `modules/tailscale.nix` | Tailscale with SSH, pre-auth key from `/var/lib/tailscale/authkey` (consumed and deleted), tailnet trusted |
 | `modules/workspace.nix` | User, data disk under `/home` (formatted on first sight only), host tools, direnv (workspace and `~/orca` whitelisted — Orca worktrees never run `direnv allow`), git identity, workspace seeding, the optional `/Users` shim |
@@ -97,7 +97,7 @@ overnight and weekends, compute is roughly a third of always-on.
 | `packages/orca.nix` | The release AppImage wrapped for NixOS: `orca-ide` (CLI, Node mode) and `orca-ide-app` (Electron runtime), pinned by tag + hash, x86_64 and aarch64 |
 | `workspace/` | What `~/<workspace>` is seeded with: `.envrc`, `repos.conf`, `init.sh`, `bootstrap.sh` |
 | `recipes/podman-sandbox/` | The Orca environment recipe to copy into a repository that wants sandboxed workspaces |
-| `azure/` | `vm.env`, `create-vm.sh` (idempotent), `install-nixos.sh`, `vm.sh` (status/stop/start/resize/rebuild/detach-public-ip/ssh/serial/run) |
+| `azure/` | `vm.env` (yours), and the scripts behind the `orca-vm` command: `create-vm.sh` (idempotent), `install-nixos.sh`, `vm.sh` (status/stop/start/resize/rebuild/detach-public-ip/ssh/serial/run) |
 
 ## Design decisions
 
@@ -161,13 +161,42 @@ gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token -q .token
 
 Read the trust note at the top of `modules/github-runner.nix` before pointing a public repository at it.
 
+## Consuming as a flake input
+
+Instead of editing a copy of this repository, your host repository can hold only what is yours and
+take the modules, packages and the `orca-vm` command from here. Three files plus a workspace directory:
+
+```
+my-host/
+├── flake.nix          one call
+├── host.nix           as above
+├── azure/vm.env       as above
+└── workspace/         your .envrc, repos.conf, any config files — seeded on top of orca-vm's workspace/
+```
+
+```nix
+{
+  inputs.orca-vm.url = "github:trbngr/orca-vm";
+  outputs = { self, orca-vm }: orca-vm.lib.mkOutputs {
+    host = import ./host.nix;
+    workspace = ./workspace;
+    # Plain NixOS modules for anything host.nix has no knob for.
+    extraModules = [ ({ pkgs, ... }: { orcaVm.githubRunner.extraPackages = [ pkgs.gitleaks ]; }) ];
+  };
+}
+```
+
+`nix flake check`, `nix develop` and every `orca-vm …` command then work in that repository exactly as
+here; `nix flake update orca-vm` pulls a newer template. The options a module can set are in
+`modules/*.nix` under `orcaVm.*`.
+
 ## Customizing further
 
 - **Workspace-wide environment** — `workspace/.envrc` is loaded by every repo shell that ends its
   `.envrc` with `source_up_if_exists`. Feed paths, cache locations, telemetry opt-outs go there.
 - **Files carrying a Mac's absolute home path** — `workspace.macHomeSymlink = true` puts
   `/Users/<name> → /home/<name>` on the box (and in every sandbox).
-- **More NixOS** — `nixos/default.nix` is a normal NixOS module: add services, kernel settings, anything.
+- **More NixOS** — pass plain NixOS modules as `extraModules` to `mkOutputs` (see "Consuming as a flake input"; the template use gets the same hook by editing `flake.nix`'s `own` call): services, kernel settings, anything.
 - **ARM** — `system = "aarch64-linux"` in `host.nix` and an ARM size (`Standard_D16pds_v5`) in
   `azure/vm.env`; both Orca AppImages are packaged. ~20 % cheaper; check the region has the quota.
 - **Regions and quota** — `create-vm.sh` refuses a size the subscription cannot have in the region
@@ -184,7 +213,7 @@ Read the trust note at the top of `modules/github-runner.nix` before pointing a 
   box is tailnet-only; if that is not enough, `gnome-keyring` with a PAM-unlocked login keyring is the fix
   Orca names.
 - **Auto-deallocate** is not wired: an Azure Automation schedule or a cron on the laptop calling
-  `azure/vm.sh stop` overnight is the shape.
+  `orca-vm stop` overnight is the shape.
 
 ## License
 

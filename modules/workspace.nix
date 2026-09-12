@@ -15,12 +15,12 @@
 #                                 `source_up`s
 #   ~/orca/workspaces/<repo>/*    Orca's worktrees
 #   /Users/<name> → /home/<name>  optional shim for files that carry a Mac's absolute home path
-{ config, lib, pkgs, self, ... }:
+{ config, lib, pkgs, ... }:
 let
   cfg = config.orcaVm.workspace;
   home = "/home/${cfg.name}";
   workspace = "${home}/${cfg.dir}";
-  # azure/create-vm.sh attaches the data disk at LUN 1. waagent's udev rules (66-azure-storage.rules,
+  # orca-vm create attaches the data disk at LUN 1. waagent's udev rules (66-azure-storage.rules,
   # installed by services.waagent) name it precisely: scsi1 is the data controller. NOT nixpkgs'
   # /dev/disk/by-lun/1 — that rule matches `?:0:0:1` on ANY host, which is also the temp disk on the
   # OS controller (0:0:0:1), and on a first boot it pointed at the data disk at second 6 and at the
@@ -59,6 +59,14 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       description = "Extra nixpkgs attribute names to install on the host (agent CLIs and the like).";
+    };
+    source = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = ''
+        A directory seeded into the workspace on top of this flake's own ./workspace (a consumer's
+        .envrc, repos.conf, extra config files). Seeded first, so on a name clash yours wins.
+      '';
     };
     # Read by other modules that need the resolved paths.
     home = lib.mkOption { type = lib.types.str; readOnly = true; default = home; };
@@ -210,7 +218,7 @@ in
       git gh jq ripgrep python3 nodejs_22 curl wget unzip file tree htop dnsutils
     ] ++ extraPackages;
 
-    # ── ~/<dir>, seeded from ./workspace ───────────────────────────────────────────────────────────
+    # ── ~/<dir>, seeded from ./workspace (and the consumer's `source` first) ───────────────────────
     # Copies only what is absent: a later change to ./workspace never overwrites a file the operator has
     # edited in place. Cloning the repos is `bootstrap.sh`, by hand, because it needs `gh auth`.
     systemd.services.orca-vm-workspace-seed = {
@@ -222,17 +230,18 @@ in
       serviceConfig = { Type = "oneshot"; User = cfg.name; Group = "users"; };
       path = [ pkgs.coreutils pkgs.findutils ];
       script = ''
-        src=${self}/workspace
         dst=${workspace}
         mkdir -p "$dst/repos"
-        (cd "$src" && find . -type f) | while read -r f; do
-          if [ ! -e "$dst/$f" ]; then
-            mkdir -p "$dst/$(dirname "$f")"
-            cp "$src/$f" "$dst/$f"
-            chmod u+w "$dst/$f"
-            case "$f" in *.sh) chmod +x "$dst/$f";; esac
-            echo "seeded $f"
-          fi
+        for src in ${lib.concatStringsSep " " (lib.optional (cfg.source != null) "${cfg.source}" ++ [ "${../workspace}" ])}; do
+          (cd "$src" && find . -type f) | while read -r f; do
+            if [ ! -e "$dst/$f" ]; then
+              mkdir -p "$dst/$(dirname "$f")"
+              cp "$src/$f" "$dst/$f"
+              chmod u+w "$dst/$f"
+              case "$f" in *.sh) chmod +x "$dst/$f";; esac
+              echo "seeded $f from $src"
+            fi
+          done
         done
       '';
     };

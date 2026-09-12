@@ -1,7 +1,7 @@
 # The only network anyone reaches this machine on. No public IP after install, no NSG inbound rules,
 # Tailscale SSH for the shell, Orca paired over the tailnet address.
 #
-# Joining: put a pre-auth key at /var/lib/tailscale/authkey (azure/install-nixos.sh does this from
+# Joining: put a pre-auth key at /var/lib/tailscale/authkey (orca-vm install does this from
 # $TS_AUTHKEY via nixos-anywhere --extra-files) and the node joins on first boot with SSH enabled.
 # Without the file, `tailscaled-autoconnect` fails harmlessly and the operator runs
 # `sudo tailscale up --ssh` once over the public-IP SSH window instead. Either way, one time.

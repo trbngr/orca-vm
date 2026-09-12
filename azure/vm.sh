@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
 # Day-2 operations on the VM.
 #
-#   azure/vm.sh status             power state, size, IPs
-#   azure/vm.sh stop               deallocate — compute stops billing, disks stay (the data disk keeps /home)
-#   azure/vm.sh start
-#   azure/vm.sh resize <size>      e.g. Standard_D32ads_v5; the VM is deallocated for it
-#   azure/vm.sh rebuild            nixos-rebuild switch over the tailnet, built on the VM (after editing)
-#   azure/vm.sh detach-public-ip   after Tailscale is up: no public address at all
-#   azure/vm.sh ssh                ssh root@<public ip> (install window); day to day use Tailscale SSH
-#   azure/vm.sh serial             the Azure serial console (rescue)
-#   azure/vm.sh run '<shell>'      run a shell snippet as root THROUGH THE AZURE AGENT — no network path
+#   orca-vm status             power state, size, IPs
+#   orca-vm stop               deallocate — compute stops billing, disks stay (the data disk keeps /home)
+#   orca-vm start
+#   orca-vm resize <size>      e.g. Standard_D32ads_v5; the VM is deallocated for it
+#   orca-vm rebuild            nixos-rebuild switch over the tailnet, built on the VM (after editing)
+#   orca-vm detach-public-ip   after Tailscale is up: no public address at all
+#   orca-vm ssh                ssh root@<public ip> (install window); day to day use Tailscale SSH
+#   orca-vm serial             the Azure serial console (rescue)
+#   orca-vm run '<shell>'      run a shell snippet as root THROUGH THE AZURE AGENT — no network path
 #                                  needed. The way in from a machine that is not on the tailnet (slow: ~30 s
 #                                  round trip, output capped by Azure).
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO="$(cd "$HERE/.." && pwd)"
-# shellcheck source=vm.env
-source "$HERE/vm.env"
+ROOT="${ORCA_VM_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+[[ -f "$ROOT/host.nix" && -f "$ROOT/azure/vm.env" ]] || { echo "❌ no host.nix + azure/vm.env under $ROOT — run from your host checkout (or set ORCA_VM_ROOT)" >&2; exit 2; }
+# shellcheck source=../azure/vm.env
+source "$ROOT/azure/vm.env"
 
 case "${1:-}" in
   rebuild)
     # No az needed: the tailnet is the path. The user account from host.nix, sudo without a password.
     user="$(hostval user.name)"
-    exec nixos-rebuild switch --flake "$REPO#$VM_NAME" \
+    exec nixos-rebuild switch --flake "$ROOT#$VM_NAME" \
       --target-host "$user@$VM_NAME" --build-host "$user@$VM_NAME" --use-remote-sudo ;;
 esac
 

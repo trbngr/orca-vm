@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Create the Azure resources for the host: resource group, network, a public IP that
 # exists only for the install window, a Premium SSD v2 data disk at LUN 1, and a stock Ubuntu VM
-# that nixos-anywhere will replace in place (azure/install-nixos.sh).
+# that nixos-anywhere will replace in place (orca-vm install).
 #
-#   azure/create-vm.sh            create everything; prints the public IP at the end
-#   azure/create-vm.sh --plan     print the resource summary and exit
+#   orca-vm create            create everything; prints the public IP at the end
+#   orca-vm create --plan     print the resource summary and exit
 #
 # Deliberate choices:
 #   --security-type Standard   Trusted Launch (the Gen2 default) enables Secure Boot, and kexec — how
@@ -22,9 +22,10 @@
 #   disk, recreate, reattach) and so /dev/disk/by-lun/1 is what the NixOS config mounts.
 set -euo pipefail
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=vm.env
-source "$HERE/vm.env"
+ROOT="${ORCA_VM_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+[[ -f "$ROOT/host.nix" && -f "$ROOT/azure/vm.env" ]] || { echo "❌ no host.nix + azure/vm.env under $ROOT — run from your host checkout (or set ORCA_VM_ROOT)" >&2; exit 2; }
+# shellcheck source=../azure/vm.env
+source "$ROOT/azure/vm.env"
 
 case "$IMAGE_ARCH" in
   arm64) IMAGE_URN="$IMAGE_URN_ARM64" ;;
@@ -127,4 +128,4 @@ fi
 
 IP="$(az vm show -d -g "$AZ_RG" -n "$VM_NAME" --query publicIps -o tsv)"
 echo ""
-echo "✅ $VM_NAME is up at $IP (stock Ubuntu). Next: azure/install-nixos.sh"
+echo "✅ $VM_NAME is up at $IP (stock Ubuntu). Next: orca-vm install"

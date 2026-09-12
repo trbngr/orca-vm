@@ -1,17 +1,7 @@
-# Module composition for the host. Values live in ../host.nix; behaviour lives in ../modules/.
-# This is the place to add your own NixOS options (extra services, kernel settings, …).
-{ host, lib, ... }:
+# host.nix → options. The one place the attribute set in host.nix is read; every other module sees only
+# `orcaVm.*` options, so a consumer that wants a different knob adds a NixOS module, not a fork.
+{ host, ... }:
 {
-  imports = [
-    ./disko.nix
-    ../modules/azure.nix
-    ../modules/tailscale.nix
-    ../modules/workspace.nix
-    ../modules/orca-server.nix
-    ../modules/sandbox.nix
-    ../modules/github-runner.nix
-  ];
-
   networking.hostName = host.hostName;
 
   orcaVm.workspace = {
@@ -39,5 +29,5 @@
 
   # The NixOS release this machine was first installed with. Never bump casually — it gates stateful
   # defaults (database formats, service state layouts), not features.
-  system.stateVersion = "26.11";
+  system.stateVersion = host.stateVersion or "26.11";
 }

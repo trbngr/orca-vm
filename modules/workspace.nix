@@ -26,12 +26,12 @@ let
   # OS controller (0:0:0:1), and on a first boot it pointed at the data disk at second 6 and at the
   # temp disk at second 19. Once formatted, the filesystem is found by its label, whatever the path.
   dataDisk = "/dev/disk/azure/scsi1/lun1";
-  dataLabel = "orcahome";
+  dataLabel = cfg.dataDiskLabel;
   # The size's temp disk — ephemeral by contract (wiped on deallocate), so formatting it whenever it
   # arrives blank is the design, not a risk. waagent could do this (ResourceDisk.Format) but does not
   # on NixOS (its daemon half is not what the module runs); the unit below is explicit and visible.
   resourceDisk = "/dev/disk/azure/resource";
-  resourceLabel = "orcascratch";
+  resourceLabel = cfg.scratchDiskLabel;
 
   # host.nix names packages as strings ("claude-code", "nodePackages.foo"); resolve them here.
   resolve = name: lib.attrByPath (lib.splitString "." name)
@@ -67,6 +67,16 @@ in
         A directory seeded into the workspace on top of this flake's own ./workspace (a consumer's
         .envrc, repos.conf, extra config files). Seeded first, so on a name clash yours wins.
       '';
+    };
+    dataDiskLabel = lib.mkOption {
+      type = lib.types.str;
+      default = "orcahome";
+      description = "ext4 label of the data disk under /home. The disk is found by this, never by device name; keep it stable across rebuilds.";
+    };
+    scratchDiskLabel = lib.mkOption {
+      type = lib.types.str;
+      default = "orcascratch";
+      description = "ext4 label of the ephemeral temp disk at /mnt/resource; a disk without it is reformatted on arrival.";
     };
     # Read by other modules that need the resolved paths.
     home = lib.mkOption { type = lib.types.str; readOnly = true; default = home; };

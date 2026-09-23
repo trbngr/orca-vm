@@ -375,6 +375,13 @@ in
       # interactive debugging. Jobs get their own remote wrappers (above).
       virtualisation.podman.dockerCompat = lib.mkForce true;
 
+      # Docker resolves a short image name (`postgres:17-alpine`) against Docker Hub; podman refuses one
+      # unless a search registry is configured ("short-name did not resolve to an alias and no
+      # unqualified-search registries are defined", app-team-calendar's scratch database, 2026-09-23).
+      # Workflows written for hosted runners use short names, so a runner offering `docker` resolves them
+      # the way Docker does. One registry, so the short-name mode never has to ask which.
+      virtualisation.containers.registries.search = [ "docker.io" ];
+
       # nixpkgs hardens the runner with ProtectHome=true, which hides /run/user along with /home, so a job
       # could not reach the podman socket ("connect: permission denied", oval-runner, 2026-09-23). tmpfs keeps
       # /home and /root empty inside the sandbox; only this user's runtime directory is bound back in.

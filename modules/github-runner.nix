@@ -320,7 +320,14 @@ in
       # interactive debugging. Jobs get their own remote wrappers (above).
       virtualisation.podman.dockerCompat = lib.mkForce true;
 
-      systemd.services.${serviceName}.serviceConfig.ReadWritePaths = [ "/run/user/${toString uid}" ];
+      # nixpkgs hardens the runner with ProtectHome=true, which hides /run/user along with /home, so a job
+      # could not reach the podman socket ("connect: permission denied", oval-runner, 2026-09-23). tmpfs keeps
+      # /home and /root empty inside the sandbox; only this user's runtime directory is bound back in.
+      # Measured with systemd-run under the same sandbox: `yes` and `read-only` fail, this runs a container.
+      systemd.services.${serviceName}.serviceConfig = {
+        ProtectHome = "tmpfs";
+        BindPaths = [ "/run/user/${toString uid}" ];
+      };
 
       # Images and stopped containers accumulate across jobs by design (the scratch database's image stays
       # warm); pruning on a schedule rather than per job keeps that warmth and bounds the disk.

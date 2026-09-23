@@ -44,6 +44,31 @@ let
   remotePodman = pkgs.writeShellScriptBin "podman" ''exec ${pkgs.podman}/bin/podman --remote "$@"'';
   remoteDocker = pkgs.writeShellScriptBin "docker" ''exec ${pkgs.podman}/bin/podman --remote "$@"'';
 
+  # Run by the runner at the start and at the end of every job (ACTIONS_RUNNER_HOOK_JOB_STARTED/_COMPLETED):
+  # every container, pod, volume and network the runner user has is removed, so no job sees what another
+  # left — another repository's scratch database included — and a leftover cannot make a build pass or fail
+  # for the wrong reason. At the start too, because a job that died cannot have cleaned up after itself.
+  # Images stay: they are what keeps a job from pulling its database image cold, and the daily prune bounds them.
+  containerCleanup = pkgs.writeShellScript "github-runner-container-cleanup.sh" ''
+    export CONTAINER_HOST=unix://${podmanSocket}
+    podman=${pkgs.podman}/bin/podman
+    echo "::group::Removing the runner's containers, pods, volumes and networks"
+    $podman --remote pod rm --all --force >/dev/null 2>&1 || true
+    $podman --remote rm --all --force --time 0 >/dev/null 2>&1 || true
+    $podman --remote volume prune --force >/dev/null 2>&1 || true
+    $podman --remote network prune --force >/dev/null 2>&1 || true
+    echo "containers left: $($podman --remote ps --all --quiet 2>/dev/null | wc -l)"
+    echo "::endgroup::"
+  '';
+
+  # Private destinations a job must not open connections to: the tailnet (100.64.0.0/10, and Tailscale's IPv6
+  # range), every RFC 1918 range (which covers the Azure subnet this box shares with other hosts), and
+  # link-local (which covers the Azure instance metadata service, 169.254.169.254). The public internet —
+  # GitHub, the package feed, nuget.org — is untouched. Matched by uid, so it covers everything the runner
+  # user starts, rootless containers' network helpers included, and nothing else on the box.
+  privateV4 = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "100.64.0.0/10" "169.254.0.0/16" ];
+  privateV6 = [ "fd7a:115c:a1e0::/48" "fc00::/7" "fe80::/10" ];
+
   cacheEnvironment = lib.optionalAttrs (cfg.cacheDir != null) {
     # Immutable, hash-verified on extract: sharing it between jobs brings back no drift, and a cold restore of
     # a large package graph per job is the cost ephemerality would otherwise add.
@@ -58,6 +83,8 @@ let
   };
 
   dockerEnvironment = lib.optionalAttrs cfg.docker.enable {
+    ACTIONS_RUNNER_HOOK_JOB_STARTED = "${containerCleanup}";
+    ACTIONS_RUNNER_HOOK_JOB_COMPLETED = "${containerCleanup}";
     DOCKER_HOST = "unix://${podmanSocket}";
     CONTAINER_HOST = "unix://${podmanSocket}";
     # Testcontainers mounts the socket into its reaper container; tell it the path the daemon sees.
@@ -203,6 +230,18 @@ in
       };
     };
 
+    denyPrivateNetworks = lib.mkOption {
+      type = lib.types.bool;
+      default = cfg.dedicatedUser.enable;
+      defaultText = lib.literalExpression "config.orcaVm.githubRunner.dedicatedUser.enable";
+      description = ''
+        Refuse every connection the runner's user opens to a private destination: the tailnet, RFC 1918
+        space (the Azure subnet), and link-local (the instance metadata service). A GitHub-hosted runner has
+        no path into your network; this keeps a self-hosted one from having one either, whatever the tailnet
+        policy says. Needs `dedicatedUser` — the rule is keyed on that user's uid. On by default with it.
+      '';
+    };
+
     hostedToolchains = lib.mkEnableOption ''
       programs.nix-ld with the libraries prebuilt toolchains need (the .NET SDK among them), so the binaries
       `actions/setup-dotnet` and friends download run as they would on a hosted runner
@@ -231,6 +270,10 @@ in
         {
           assertion = cfg.ephemeral -> cfg.githubApp != null;
           message = "orcaVm.githubRunner.ephemeral needs `githubApp`: a staged registration token expires within the hour.";
+        }
+        {
+          assertion = cfg.denyPrivateNetworks -> dedicated;
+          message = "orcaVm.githubRunner.denyPrivateNetworks needs `dedicatedUser`: the rule is keyed on that user's uid.";
         }
         {
           assertion = cfg.docker.enable -> dedicated;
@@ -356,6 +399,25 @@ in
         wantedBy = [ "timers.target" ];
         timerConfig = { OnCalendar = cfg.docker.pruneSchedule; Persistent = true; };
       };
+    })
+
+    (lib.mkIf cfg.denyPrivateNetworks {
+      # A chain of our own, (re)built on every firewall start, jumped to from OUTPUT for the runner's uid only.
+      networking.firewall.extraCommands = ''
+        iptables -N orca-runner-egress 2>/dev/null || iptables -F orca-runner-egress
+        ${lib.concatMapStringsSep "\n" (n: "iptables -A orca-runner-egress -d ${n} -j REJECT") privateV4}
+        iptables -D OUTPUT -m owner --uid-owner ${toString uid} -j orca-runner-egress 2>/dev/null || true
+        iptables -I OUTPUT -m owner --uid-owner ${toString uid} -j orca-runner-egress
+
+        ip6tables -N orca-runner-egress 2>/dev/null || ip6tables -F orca-runner-egress
+        ${lib.concatMapStringsSep "\n" (n: "ip6tables -A orca-runner-egress -d ${n} -j REJECT") privateV6}
+        ip6tables -D OUTPUT -m owner --uid-owner ${toString uid} -j orca-runner-egress 2>/dev/null || true
+        ip6tables -I OUTPUT -m owner --uid-owner ${toString uid} -j orca-runner-egress
+      '';
+      networking.firewall.extraStopCommands = ''
+        iptables -D OUTPUT -m owner --uid-owner ${toString uid} -j orca-runner-egress 2>/dev/null || true
+        ip6tables -D OUTPUT -m owner --uid-owner ${toString uid} -j orca-runner-egress 2>/dev/null || true
+      '';
     })
 
     (lib.mkIf cfg.hostedToolchains {

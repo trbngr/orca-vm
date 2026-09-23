@@ -38,10 +38,37 @@ fi
 
 # The flake that declares the host: the checkout itself, or (ORCA_VM_FLAKE) a parent whose flake declares
 # several hosts, each with its own host.nix + azure/vm.env in a subdirectory.
-nixos-anywhere \
-  --flake "${ORCA_VM_FLAKE:-$ROOT}#$VM_NAME" \
-  --build-on remote \
+flake="${ORCA_VM_FLAKE:-$ROOT}#$VM_NAME"
+ssh_opts=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30)
+
+# 1. Boot the NixOS installer into RAM, and stop there.
+nixos-anywhere --flake "$flake" --phases kexec \
   --target-host "$ADMIN_USER@$IP" \
+  --ssh-option StrictHostKeyChecking=no --ssh-option UserKnownHostsFile=/dev/null
+
+# 2. Find the OS disk by what Azure fixes, not by kernel name: LUN 0 on the OS storage controller (VMBus
+#    f8b3781a-1e82-4818-a1c3-63d806ec15bb). Exactly one disk must match, or nothing is formatted —
+#    disko destroys whatever /dev/orca-vm-os-disk points at (modules/disko.nix).
+echo "▶ locating the OS disk (LUN 0 on the OS storage controller)"
+for _ in $(seq 1 30); do ssh "${ssh_opts[@]}" "root@$IP" true 2>/dev/null && break; sleep 5; done
+os_disk="$(ssh "${ssh_opts[@]}" "root@$IP" 'set -eu
+  found=""
+  for d in /sys/block/sd*; do
+    case "$(readlink -f "$d/device")" in
+      */f8b3781a-1e82-4818-a1c3-63d806ec15bb/host*/target*/*:0:0:0) found="$found /dev/${d##*/}" ;;
+    esac
+  done
+  set -- $found
+  [ "$#" -eq 1 ] || { echo "expected one OS disk, found: ${found:-none}" >&2; exit 1; }
+  ln -sfn "$1" /dev/orca-vm-os-disk
+  echo "$1 $(lsblk -dno SIZE "$1")"')" \
+  || { echo "❌ could not identify the OS disk; nothing was formatted" >&2; exit 1; }
+echo "  $os_disk → /dev/orca-vm-os-disk"
+
+# 3. Partition that disk, install, reboot — building the system on the VM (a Mac cannot build Linux).
+nixos-anywhere --flake "$flake" --phases disko,install,reboot \
+  --build-on remote \
+  --target-host "root@$IP" \
   --extra-files "$extra" \
   --ssh-option StrictHostKeyChecking=no \
   --ssh-option UserKnownHostsFile=/dev/null

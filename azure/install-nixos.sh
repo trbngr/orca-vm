@@ -36,8 +36,10 @@ if [[ -n "${TS_AUTHKEY:-}" ]]; then
   echo "▶ Tailscale pre-auth key staged (consumed on first boot)"
 fi
 
+# The flake that declares the host: the checkout itself, or (ORCA_VM_FLAKE) a parent whose flake declares
+# several hosts, each with its own host.nix + azure/vm.env in a subdirectory.
 nixos-anywhere \
-  --flake "$ROOT#$VM_NAME" \
+  --flake "${ORCA_VM_FLAKE:-$ROOT}#$VM_NAME" \
   --build-on remote \
   --target-host "$ADMIN_USER@$IP" \
   --extra-files "$extra" \

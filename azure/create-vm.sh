@@ -18,6 +18,9 @@
 #   NSG: SSH from THIS machine's public IP only, for the install window. Nothing else, ever.
 #   NAT gateway: outbound internet for a VM with no public IP — Azure's default outbound access is gone
 #                              for new VNets, and nix/gh/Tailscale all need egress (vm.env, NAT_GATEWAY).
+#   EXISTING_SUBNET_ID: put the VM on a subnet another host already owns instead of creating a network —
+#                              it then leaves through THAT subnet's NAT gateway, so a firewall that admits
+#                              one box admits both. No virtual network or NAT gateway is created.
 #   The data disk is separate and attached at LUN 1, so it can outlive the VM (delete the VM, keep the
 #   disk, recreate, reattach) and so /dev/disk/by-lun/1 is what the NixOS config mounts.
 set -euo pipefail
@@ -56,6 +59,7 @@ else
   echo "  data disk     ${DATA_DISK_GB} GiB ${DATA_DISK_SKU} (sized tier), LUN 1"
 fi
 echo "  ssh from      $MY_IP/32 (install window only)"
+[[ -n "${EXISTING_SUBNET_ID:-}" ]] && echo "  subnet        $EXISTING_SUBNET_ID (existing; its NAT is the egress)"
 [[ "${1:-}" == "--plan" ]] && exit 0
 
 az account set --subscription "$AZ_SUBSCRIPTION"
@@ -76,11 +80,21 @@ az network nsg rule create -g "$AZ_RG" --nsg-name "$VM_NAME-nsg" -n allow-ssh-op
 || az network nsg rule update -g "$AZ_RG" --nsg-name "$VM_NAME-nsg" -n allow-ssh-operator \
   --source-address-prefixes "$MY_IP/32" -o none
 
-echo "▶ virtual network"
-exists network vnet show -g "$AZ_RG" -n "$VM_NAME-vnet" || az network vnet create -g "$AZ_RG" -n "$VM_NAME-vnet" \
-  --address-prefix 10.42.0.0/16 --subnet-name default --subnet-prefix 10.42.1.0/24 -o none
+if [[ -n "${EXISTING_SUBNET_ID:-}" ]]; then
+  echo "▶ existing subnet"
+  exists network vnet subnet show --ids "$EXISTING_SUBNET_ID" \
+    || { echo "❌ EXISTING_SUBNET_ID not found: $EXISTING_SUBNET_ID" >&2; exit 1; }
+  [[ -n "$(az network vnet subnet show --ids "$EXISTING_SUBNET_ID" --query natGateway.id -o tsv)" ]] \
+    || echo "  ⚠ that subnet has no NAT gateway — the VM will have no egress once its public IP is gone"
+  subnet_args=(--subnet "$EXISTING_SUBNET_ID")
+else
+  echo "▶ virtual network"
+  exists network vnet show -g "$AZ_RG" -n "$VM_NAME-vnet" || az network vnet create -g "$AZ_RG" -n "$VM_NAME-vnet" \
+    --address-prefix 10.42.0.0/16 --subnet-name default --subnet-prefix 10.42.1.0/24 -o none
+  subnet_args=(--vnet-name "$VM_NAME-vnet" --subnet default)
+fi
 
-if [[ "$NAT_GATEWAY" == "true" ]]; then
+if [[ -z "${EXISTING_SUBNET_ID:-}" && "$NAT_GATEWAY" == "true" ]]; then
   echo "▶ NAT gateway (the box's outbound path once its public IP is gone)"
   exists network public-ip show -g "$AZ_RG" -n "$VM_NAME-natip" || az network public-ip create -g "$AZ_RG" -n "$VM_NAME-natip" \
     --sku Standard --allocation-method Static "${zone_args[@]}" -o none
@@ -95,7 +109,7 @@ exists network public-ip show -g "$AZ_RG" -n "$VM_NAME-pip" || az network public
 
 echo "▶ NIC with accelerated networking"
 exists network nic show -g "$AZ_RG" -n "$VM_NAME-nic" || az network nic create -g "$AZ_RG" -n "$VM_NAME-nic" \
-  --vnet-name "$VM_NAME-vnet" --subnet default --network-security-group "$VM_NAME-nsg" \
+  "${subnet_args[@]}" --network-security-group "$VM_NAME-nsg" \
   --public-ip-address "$VM_NAME-pip" --accelerated-networking true -o none
 
 echo "▶ data disk ($DATA_DISK_SKU)"

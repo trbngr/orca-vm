@@ -11,7 +11,8 @@
   };
 
   orcaVm.orca = {
-    enable = true;
+    # On unless a host says otherwise: a dedicated CI box (githubRunner.dedicatedUser) runs no Orca.
+    enable = host.orca.enable or true;
     inherit (host.orca) port pairingAddress memoryHigh memoryMax;
   };
 

@@ -9,7 +9,9 @@
 #   orca-vm status|stop|start|resize <size>|detach-public-ip|ssh|serial|run '<shell>'
 #
 # ORCA_VM_ROOT overrides where host.nix and azure/vm.env are looked for (default: the git toplevel
-# of the current directory).
+# of the current directory). ORCA_VM_FLAKE overrides the flake install and rebuild use (default:
+# ORCA_VM_ROOT) — for a repository whose one flake declares several hosts, each in a subdirectory:
+#   ORCA_VM_ROOT=$PWD/runner ORCA_VM_FLAKE=$PWD orca-vm create
 set -euo pipefail
 
 libexec="${ORCA_VM_LIBEXEC:-$(cd "$(dirname "$(realpath "$0")")" && pwd)}"

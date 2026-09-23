@@ -23,7 +23,7 @@ case "${1:-}" in
   rebuild)
     # No az needed: the tailnet is the path. The user account from host.nix, sudo without a password.
     user="$(hostval user.name)"
-    exec nixos-rebuild switch --flake "$ROOT#$VM_NAME" \
+    exec nixos-rebuild switch --flake "${ORCA_VM_FLAKE:-$ROOT}#$VM_NAME" \
       --target-host "$user@$VM_NAME" --build-host "$user@$VM_NAME" --use-remote-sudo ;;
 esac
 

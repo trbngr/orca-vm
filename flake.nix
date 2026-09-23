@@ -97,6 +97,7 @@
                       labels = [ "linux" "x64" ];
                       githubApp = { id = 1; login = "example-org"; };
                       ephemeral = true;
+                      runnerGroup = "example-group";
                       dedicatedUser = true;
                       workDir = "/mnt/resource/github-runner/work";
                       cacheDir = "/mnt/resource/github-runner/cache";

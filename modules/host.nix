@@ -17,9 +17,20 @@
 
   orcaVm.sandbox.enable = host.sandbox.enable;
 
-  orcaVm.githubRunner = {
-    inherit (host.githubRunner) enable repository;
-    extraLabels = host.githubRunner.labels;
+  # Every key past `enable` is optional, so a host.nix written for the workspace-runner shape (repository +
+  # labels) keeps evaluating unchanged; the CI-host keys are documented in modules/github-runner.nix.
+  orcaVm.githubRunner = let r = host.githubRunner; in {
+    inherit (r) enable;
+    repository = r.repository or null;
+    url = r.url or null;
+    extraLabels = r.labels or [ "nixos" ];
+    githubApp = r.githubApp or null;
+    ephemeral = r.ephemeral or false;
+    dedicatedUser.enable = r.dedicatedUser or false;
+    workDir = r.workDir or null;
+    cacheDir = r.cacheDir or null;
+    docker.enable = r.docker or false;
+    hostedToolchains = r.hostedToolchains or false;
   };
 
   # Root keeps the same keys: nixos-anywhere's post-install SSH, and `nixos-rebuild --target-host` when

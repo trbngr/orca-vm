@@ -93,7 +93,7 @@ overnight and weekends, compute is roughly a third of always-on.
 | `modules/workspace.nix` | User, data disk under `/home` (formatted on first sight only), host tools, direnv (workspace and `~/orca` whitelisted — Orca worktrees never run `direnv allow`), git identity, workspace seeding, the optional `/Users` shim |
 | `modules/orca-server.nix` | `orca-serve.service`: `orca-ide-app --no-sandbox serve`, advertised address resolved from tailscaled at start; `orca-pairing` |
 | `modules/sandbox.nix`, `packages/sandbox-rootfs.nix` | Optional: the host side of one rootless podman container per Orca workspace |
-| `modules/github-runner.nix` | Optional: a self-hosted GitHub Actions runner as the workspace user |
+| `modules/github-runner.nix` | Optional: a self-hosted GitHub Actions runner — beside the workspace as you, or a dedicated, ephemeral CI host |
 | `packages/orca.nix` | The release AppImage wrapped for NixOS: `orca-ide` (CLI, Node mode) and `orca-ide-app` (Electron runtime), pinned by tag + hash, x86_64 and aarch64 |
 | `workspace/` | What `~/<workspace>` is seeded with: `.envrc`, `repos.conf`, `init.sh`, `bootstrap.sh` |
 | `recipes/podman-sandbox/` | The Orca environment recipe to copy into a repository that wants sandboxed workspaces |
@@ -151,15 +151,45 @@ to `~/.config/orca-sandbox/claude-token` (mode 0600).
 
 ## Optional: a GitHub Actions runner
 
-For repositories whose CI needs what only this box has. Set `githubRunner.repository` in `host.nix`,
-stage a registration token (it is short-lived and consumed once), *then* flip `enable` and rebuild:
+Two shapes, one module (`modules/github-runner.nix`). Read the trust note at its top before pointing any
+repository at it, and keep fork pull-request workflows off for every repository that can reach it.
+
+**Beside a workspace**, for repositories whose CI needs what only this box has: one long-lived runner,
+repository-scoped, running as you. Set `githubRunner.repository` (and `labels`) in `host.nix`, stage a
+registration token (short-lived, consumed once), *then* flip `enable` and rebuild:
 
 ```bash
 gh api -X POST repos/<owner>/<repo>/actions/runners/registration-token -q .token \
   | ssh <hostName> 'sudo install -m 0600 -o root /dev/stdin /var/lib/github-runner/token'
 ```
 
-Read the trust note at the top of `modules/github-runner.nix` before pointing a public repository at it.
+**A dedicated CI host**, a box that runs nothing else. Each job gets a freshly registered runner, a clean
+state and work directory, and its own system user; only the caches worth keeping survive between jobs.
+
+```nix
+githubRunner = {
+  enable = true;
+  url = "https://github.com/<org>";          # or <owner>/<repo>; restrict an org runner with a runner group
+  labels = [ "linux" "x64" ];
+  githubApp = { id = <app id>; login = "<org>"; };   # key at /var/lib/github-runner/app.pem
+  ephemeral = true;                            # one job per registration (needs githubApp)
+  dedicatedUser = true;                        # jobs run as `github-runner`, not as you
+  workDir = "/mnt/resource/github-runner/work";
+  cacheDir = "/mnt/resource/github-runner/cache";   # NuGet packages + the Actions tool cache, kept
+  docker = true;                               # rootless podman for jobs, as `docker`/`podman`
+  hostedToolchains = true;                     # nix-ld, so actions/setup-* binaries run
+};
+```
+
+The App needs one permission, **Self-hosted runners: Read and write** on the organisation (or
+**Administration** on a repository), and no webhook. Stage its key the way the token is staged, then enable:
+
+```bash
+ssh <hostName> 'sudo install -m 0600 -o root /dev/stdin /var/lib/github-runner/app.pem' < app.private-key.pem
+```
+
+`nix flake check` evaluates this shape too (`ci-runner-evaluates`), so a change that breaks it fails on
+the laptop.
 
 ## Consuming as a flake input
 

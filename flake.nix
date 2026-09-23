@@ -84,6 +84,28 @@
               host-evaluates = pkgs.runCommand "${host.hostName}-evaluates" {
                 drv = system.config.system.build.toplevel.drvPath;
               } ''echo "$drv" > $out'';
+
+              # The same host as a dedicated CI runner, every runner option on. Nothing builds or deploys it;
+              # it exists so a change to modules/github-runner.nix that breaks that shape fails here, on the
+              # laptop, rather than on the next rebuild of a CI box.
+              ci-runner-evaluates = pkgs.runCommand "${host.hostName}-ci-runner-evaluates" {
+                drv = (self.lib.mkHost (args // {
+                  host = host // {
+                    githubRunner = {
+                      enable = true;
+                      url = "https://github.com/example-org";
+                      labels = [ "linux" "x64" ];
+                      githubApp = { id = 1; login = "example-org"; };
+                      ephemeral = true;
+                      dedicatedUser = true;
+                      workDir = "/mnt/resource/github-runner/work";
+                      cacheDir = "/mnt/resource/github-runner/cache";
+                      docker = true;
+                      hostedToolchains = true;
+                    };
+                  };
+                })).config.system.build.toplevel.drvPath;
+              } ''echo "$drv" > $out'';
             });
           };
       };

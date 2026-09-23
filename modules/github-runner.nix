@@ -135,6 +135,18 @@ in
       '';
     };
 
+    runnerGroup = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "consumer-ci";
+      description = ''
+        The organisation runner group to register into; null is the org's Default group. Set it for an
+        org-scoped runner: the group's repository access is what limits which repositories can use the
+        runner. An ephemeral runner re-registers after every job, so the group has to be named here — a
+        one-off move in the UI would be undone by the next job. The group must exist before registration.
+      '';
+    };
+
     ephemeral = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -229,7 +241,7 @@ in
         name = runnerName;
 
         inherit url;
-        inherit (cfg) extraLabels ephemeral;
+        inherit (cfg) extraLabels ephemeral runnerGroup;
 
         tokenFile = if cfg.githubApp == null then cfg.tokenFile else null;
         githubApp = cfg.githubApp;

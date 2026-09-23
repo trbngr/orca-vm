@@ -27,6 +27,7 @@
     extraLabels = r.labels or [ "nixos" ];
     githubApp = r.githubApp or null;
     ephemeral = r.ephemeral or false;
+    runnerGroup = r.runnerGroup or null;
     dedicatedUser.enable = r.dedicatedUser or false;
     workDir = r.workDir or null;
     cacheDir = r.cacheDir or null;

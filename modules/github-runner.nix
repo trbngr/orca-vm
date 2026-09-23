@@ -275,7 +275,11 @@ in
           };
       };
 
-      systemd.tmpfiles.rules = [ "d /var/lib/github-runner 0700 root root -" ]
+      # 0755, not 0700: nixpkgs keeps the runner's state in /var/lib/github-runner/<name>, owned by the runner's
+      # user, and a 0700 root parent locked a dedicated user out of its own state directory ("mkdir: cannot
+      # create directory '/var/lib/github-runner': Permission denied", oval-runner, 2026-09-23). The secrets
+      # beside it are protected by their own mode — the token and the App key are root-owned 0600 files.
+      systemd.tmpfiles.rules = [ "d /var/lib/github-runner 0755 root root -" ]
         ++ lib.optional (cfg.workDir == null) "d ${workDir} 0755 ${ws.name} users -";
     }
 

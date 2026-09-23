@@ -3,12 +3,20 @@
 # Orca's state) must survive a reinstall. modules/workspace.nix mounts that one by LUN and
 # formats it once, on first sight, only when it carries no filesystem.
 #
-# /dev/sda is the Azure OS disk on the SCSI controller for every Gen2 v5 size, ARM included. Verify
-# with `lsblk` on the stock VM before the install if the size changes (v6 sizes move the OS disk to NVMe).
+# The device is NOT a kernel name. `/dev/sda` was, and it is whichever disk the kernel probed first: on
+# oval-builder's install that happened to be the OS disk, on oval-runner's it was the 32 GiB data disk,
+# and NixOS was installed onto that while the 64 GiB OS disk kept its stock Ubuntu. The Hyper-V storage
+# controllers are probed in no fixed order, so `by-path` names (which carry the SCSI host number) are no
+# better. What IS fixed is Azure's layout: the OS disk is LUN 0 on the OS storage controller, VMBus
+# f8b3781a-1e82-4818-a1c3-63d806ec15bb; data disks sit on a different controller. `orca-vm install`
+# boots the installer, finds exactly that disk, and links it here before disko runs (azure/install-nixos.sh).
+# Only the install reads this path: the installed system mounts by partition label.
+#
+# NVMe sizes (v6) put the OS disk on NVMe; the lookup refuses rather than guess, and would need extending.
 {
   disko.devices.disk.os = {
     type = "disk";
-    device = "/dev/sda";
+    device = "/dev/orca-vm-os-disk";
     content = {
       type = "gpt";
       partitions = {

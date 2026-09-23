@@ -51,6 +51,10 @@ let
     # Where actions/setup-* keep the SDKs they download — versioned directories, the same argument.
     RUNNER_TOOL_CACHE = "${cfg.cacheDir}/toolcache";
     AGENT_TOOLSDIRECTORY = "${cfg.cacheDir}/toolcache";
+    # actions/setup-dotnet installs to /usr/share/dotnet on Linux, not to the tool cache, and the runner's
+    # filesystem is read-only outside its own paths ("mkdir: cannot create directory '/usr/share'",
+    # oval-runner, 2026-09-23). SDKs install side by side by version, so the same argument as above holds.
+    DOTNET_INSTALL_DIR = "${cfg.cacheDir}/dotnet";
   };
 
   dockerEnvironment = lib.optionalAttrs cfg.docker.enable {
@@ -73,6 +77,7 @@ let
       cfg.cacheDir
       "${cfg.cacheDir}/nuget/packages"
       "${cfg.cacheDir}/toolcache"
+      "${cfg.cacheDir}/dotnet"
     ];
 in
 {

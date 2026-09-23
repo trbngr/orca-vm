@@ -243,6 +243,13 @@ in
         inherit url;
         inherit (cfg) extraLabels ephemeral runnerGroup;
 
+        # Take over a registration that still carries this name. A restart (every `nixos-rebuild switch`
+        # that touches the unit) re-registers while GitHub still shows the previous registration online;
+        # the cleanup only removes OFFLINE runners, so registration then failed with "A runner exists with the
+        # same name" (oval-runner, 2026-09-23). The name is the hostname, unique per machine, so replacing
+        # it only ever replaces this box's own earlier self.
+        replace = true;
+
         tokenFile = if cfg.githubApp == null then cfg.tokenFile else null;
         githubApp = cfg.githubApp;
 
